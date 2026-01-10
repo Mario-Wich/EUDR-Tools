@@ -1,0 +1,5 @@
+
+streamlit==1.39.0
+pyyaml==6.0.2
+pandas==2.2.3
+shapely==2.0.6

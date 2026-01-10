@@ -1,0 +1,20 @@
+# Backward-compatible defaults (used if a tool-specific value is missing)
+defaults:
+  input_folder: "C:\Users\Mario\Documents\EUDR\Input"
+  output_folder: "C:\Users\Mario\Documents\EUDR\Output"
+  default_country: "Unknown"
+
+merge_geojson:
+  input_folder: ""
+  output_folder: ""
+  default_country: "NZ"
+
+csv_to_geojson:
+  input_folder: ""
+  output_folder: ""
+  default_country: "NZ"
+  vertex_order_col: null   # e.g. "vertex_index"
+
+extract_embedded:
+  input_folder: ""
+  output_folder: ""
