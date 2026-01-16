@@ -1,9 +1,12 @@
-
 # app.py
 from __future__ import annotations
 import streamlit as st
 import yaml
 from pathlib import Path
+import tempfile
+import shutil
+from typing import Optional, List
+from io import BytesIO
 
 from core.merge_geojson_lib import merge_geojson
 from core.csv_to_geojson_lib import batch_csv_to_geojson
@@ -17,9 +20,7 @@ CFG_PATH = APP_DIR / "config.yaml"
 
 DEFAULTS = {
     "defaults": {
-        #"input_folder": str(Path.home() / "Documents" / "EUDR" / "Input"),
         "input_folder": str(APP_DIR / "Input"),
-        #"output_folder": str(Path.home() / "Documents" / "EUDR" / "Output"),
         "output_folder": str(APP_DIR / "Output"),
         "default_country": "NZ",
     }
@@ -38,13 +39,145 @@ else:
     CFG = DEFAULTS
 
 def cfg_get(tool: str, key: str, fallback: str):
-    # Prefer tool-specific, fall back to global defaults
-    return (CFG.get(tool, {}) or {}).get(key) or CFG["defaults"].get(key) or fallback
+    try:
+        return CFG.get(tool, {}).get(key, CFG.get("defaults", {}).get(key, fallback))
+    except Exception:
+        return fallback
 
 st.title("EUDR Data Tools")
-st.caption("Runs locally (127.0.0.1). No external sharing or uploads.")
+st.caption("Runs locally. No external sharing or uploads.")
 
-tab1, tab2, tab3 = st.tabs(["Merge GeoJSON", "CSV → GeoJSON", "Extract Embedded"])
+# ---------------- Helper utilities for uploaded files ----------------
+
+def save_uploaded_files(uploaded_files, dest: Path) -> List[Path]:
+    dest.mkdir(parents=True, exist_ok=True)
+    saved: List[Path] = []
+    for upload in uploaded_files:
+        target = dest / upload.name
+        # uploaded_file in Streamlit has getbuffer() on bytes-like
+        try:
+            data = upload.getbuffer()
+            target.write_bytes(data)
+        except Exception:
+            # fallback to read()
+            target.write_bytes(upload.read())
+        saved.append(target)
+    return saved
+
+def mk_temp_dir(prefix: str = "eudr_") -> Path:
+    return Path(tempfile.mkdtemp(prefix=prefix))
+
+def cleanup_temp_dir(p: Path):
+    try:
+        shutil.rmtree(p)
+    except Exception:
+        pass
+
+# ------------- Universal quick uploader (auto-detect & auto-pick) -------------
+st.subheader("Universal Quick Process")
+
+quick_upload = st.file_uploader(
+    ".geojson, .csv, .xlsx, .zip files will be saved to a temporary folder and processed",
+    accept_multiple_files=True
+)
+
+# Always-visible quick output controls
+out_root_default = Path(cfg_get("defaults", "output_folder", str(APP_DIR / "Output")))
+quick_output_folder = st.text_input("Output Folder", str(out_root_default), key="quick_output_folder")
+out_name_quick = st.text_input("Output File Name", "quick_merged_geojson", key="quick_output_name")
+
+if quick_upload:
+    tmp = mk_temp_dir("eudr_upload_")
+    saved = save_uploaded_files(quick_upload, tmp)
+    exts = {p.suffix.lower() for p in saved}
+    st.write("Detected file types:", ", ".join(sorted(exts)))
+
+    # Reveal additional options depending on detected file types
+    st.markdown("**Quick options (customize before running)**")
+
+    producer_country_quick_geo = None
+    producer_country_quick_csv = None
+    order_col_quick = None
+    bbox_quick = False
+
+    if ".geojson" in exts:
+        producer_country_quick_geo = st.text_input(
+            "ProducerCountry (for merge)",
+            cfg_get("merge_geojson", "default_country", cfg_get("defaults", "default_country", "Unknown")),
+            key="quick_merge_producer_country",
+        )
+        bbox_quick = st.checkbox("Include bbox (for merge)", value=False, key="quick_merge_include_bbox")
+
+    if ".csv" in exts:
+        producer_country_quick_csv = st.text_input(
+            "ProducerCountry (for CSV → GeoJSON)",
+            cfg_get("csv_to_geojson", "default_country", cfg_get("defaults", "default_country", "NZ")),
+            key="quick_csv_producer_country",
+        )
+
+    # determine processors
+    to_run = []
+    if any(e == ".geojson" for e in exts):
+        to_run.append("merge_geojson")
+    if any(e == ".csv" for e in exts):
+        to_run.append("csv_to_geojson")
+    if any(e in (".xlsx", ".zip") for e in exts):
+        to_run.append("extract_embedded")
+
+    if to_run:
+        st.write("Auto-picked processors:", ", ".join(to_run))
+        if st.button("Run selected processors", key="quick_run"):
+            # Run each selected processor and show results
+            try:
+                if "merge_geojson" in to_run:
+                    # ensure output path is sensible
+                    out_file = Path(quick_output_folder) / out_name_quick
+                    final_path, summary = merge_geojson(
+                        input_folder=str(tmp),
+                        output_file=str(out_file),
+                        producer_country=producer_country_quick_geo or cfg_get("defaults", "default_country", "NZ"),
+                        add_bbox=bbox_quick,
+                    )
+                    st.success(f"merge_geojson: Done → {final_path}")
+                    st.metric("Files scanned", summary["files_scanned"]); st.metric("Unique features", summary["unique_features"])
+                    if summary.get("errors"):
+                        with st.expander("Merge errors"):
+                            for p, msg in summary["errors"]:
+                                st.write(f"- {p}: {msg}")
+                if "csv_to_geojson" in to_run:
+                    summary = batch_csv_to_geojson(
+                        str(tmp),
+                        str(Path(quick_output_folder)),
+                        producer_country_quick_csv or cfg_get("defaults", "default_country", "NZ"),
+                        order_col_quick or None,
+                    )
+                    st.success(f"csv_to_geojson: Written {summary['outputs']} files (of {summary['inputs']})")
+                    if summary.get("errors"):
+                        with st.expander("CSV errors"):
+                            for name, msg in summary["errors"]:
+                                st.write(f"- {name}: {msg}")
+                if "extract_embedded" in to_run:
+                    s = extract_embedded(str(tmp), str(Path(quick_output_folder)))
+                    st.success("extract_embedded: Extraction completed")
+                    st.metric(".xlsx extracted", s["xlsx"]); st.metric(".zip extracted", s["zip"]); st.metric("nested zips", s["nested_zips"])
+                    if s.get("outputs"):
+                        with st.expander("Output files"):
+                            for src, outp in s["outputs"]:
+                                st.write(f"- {src} → {outp}")
+            except Exception as e:
+                st.error(f"Error during processing: {e}")
+            finally:
+                cleanup_temp_dir(tmp)
+    else:
+        st.info("No known processors matched the uploaded file types. Supported: .geojson, .csv, .xlsx, .zip")
+        if st.button("Remove uploaded temp files", key="quick_cleanup"):
+            cleanup_temp_dir(tmp)
+            st.info("Temporary files removed")
+
+
+# -----------------------------------------------------------------------------
+with st.expander("Manual processor choice"):
+    tab1, tab2, tab3 = st.tabs(["Merge GeoJSON", "CSV → GeoJSON", "Extract Embedded"])
 
 # -------------------- TAB 1: MERGE GEOJSON --------------------
 with tab1:
@@ -116,11 +249,6 @@ with tab2:
         "ProducerCountry",
         cfg_get("csv_to_geojson", "default_country", "NZ"),
         key="csv_producer_country",
-    )
-    order_col = st.text_input(
-        "Vertex order column (optional)",
-        str(cfg_get("csv_to_geojson", "vertex_order_col", "")) or "",
-        key="csv_vertex_order_col",
     )
     c21, c22 = st.columns(2)
     if c21.button("Preview CSVs", key="csv_preview"):
