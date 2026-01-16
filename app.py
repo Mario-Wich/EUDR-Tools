@@ -46,7 +46,7 @@ def cfg_get(tool: str, key: str, fallback: str):
         return fallback
 
 st.title("EUDR Data Tools")
-st.caption("Runs locally. No external sharing or uploads.")
+st.caption("Runs locally - no external sharing or uploads.")
 
 # ---------------- Helper utilities for uploaded files ----------------
 
@@ -110,11 +110,9 @@ _components_html = """
 })();
 </script>
 """
-# height=0 sometimes isn't enough; set small height to avoid vertical gap
 components.html(_components_html, height=10, scrolling=False)
 
 def get_client_width() -> Optional[int]:
-    # Use st.query_params (replacement for experimental_get_query_params)
     params = st.query_params
     w = None
     if isinstance(params, dict):
@@ -132,7 +130,6 @@ client_width = get_client_width()
 
 # Decide column ratios based on width
 def choose_cols_ratio(width: Optional[int], purpose: str = "quick") -> List[float]:
-    # purpose may be 'quick' or 'tab'
     if width is None:
         # fallback defaults
         return [1.4, 2.6] if purpose == "quick" else [1.6, 2.4]
@@ -149,21 +146,28 @@ def choose_cols_ratio(width: Optional[int], purpose: str = "quick") -> List[floa
     return [2.0, 3.0] if purpose == "quick" else [1.8, 2.8]
 
 # -----------------------------------------------------------------------------
-# Compact "Universal Quick Process" area (uses responsive columns)
 st.subheader("Universal Quick Process")
 
-# Always-visible quick output controls (left column)
 out_root_default = Path(cfg_get("defaults", "output_folder", str(APP_DIR / "Output")))
 
-ratios_quick = choose_cols_ratio(client_width, purpose="quick")
+ratios_quick_2 = choose_cols_ratio(client_width, purpose="quick")
+if len(ratios_quick_2) == 1:
+    ratios_quick = [1.0, 1.0, 1.0]
+else:
+    left_base, right_base = ratios_quick_2[0], ratios_quick_2[1]
+    middle = min(left_base, right_base) * 0.9
+    ratios_quick = [left_base, middle, right_base]
+
+# Create three columns
 if len(ratios_quick) == 1:
     left_col = st.container()
+    mid_col = left_col
     right_col = left_col
 else:
     cols = st.columns(ratios_quick)
-    left_col, right_col = cols[0], cols[1]
+    left_col, mid_col, right_col = cols[0], cols[1], cols[2]
 
-# LEft column: Upload files
+# Left column: Upload files
 with left_col:
     st.markdown("**Upload files**")
     quick_upload = st.file_uploader(
@@ -172,29 +176,27 @@ with left_col:
         key="quick_uploader"
     )
 
-# Right column: Output options, detected types, per-type options and results
-with right_col:
+# Middle column: Output options
+with mid_col:
     st.markdown("**Output**")
     quick_output_folder = st.text_input("Quick output folder", str(out_root_default), key="quick_output_folder")
     out_name_quick = st.text_input("Quick output file name (merged)", "quick_merged_geojson", key="quick_output_name")
-    st.markdown("---")
+
+# Right column: Detected types, per-type options and results
+with right_col:
     st.markdown("**Detected / Options**")
     detected_exts = set()
     tmp_folder: Optional[Path] = None
+    # When files are uploaded, save them to a temporary folder (not persisted between restarts)
     if quick_upload:
         tmp_folder = mk_temp_dir("eudr_quick_")
         saved = save_uploaded_files(quick_upload, tmp_folder)
         detected_exts = {p.suffix.lower() for p in saved}
         st.caption("Detected file types: " + ", ".join(sorted(detected_exts)))
     else:
-        st.caption("No files uploaded — set output and upload to enable Quick Run")
+        st.caption("No files uploaded — upload to enable quick run")
 
-    # compact options area (use two narrow columns for option fields when wide enough)
-    if len(ratios_quick) == 1:
-        opt_cols = [st.container(), st.container()]
-    else:
-        opt_cols = st.columns(2)
-
+    opt_cols = st.columns(2)
     producer_country_quick_geo = None
     producer_country_quick_csv = None
     order_col_quick = None
@@ -217,14 +219,8 @@ with right_col:
                 cfg_get("csv_to_geojson", "default_country", cfg_get("defaults", "default_country", "NZ")),
                 key="quick_csv_producer_country"
             )
-        with opt_cols[1]:
-            order_col_quick = st.text_input(
-                "Vertex order column (optional, CSV)",
-                str(cfg_get("csv_to_geojson", "vertex_order_col", "")) or "",
-                key="quick_csv_vertex_order_col"
-            )
 
-    # compact run UI: group into a single form so options + run are tidy
+    # compact run UI in right column (actions/results)
     with st.form(key="quick_run_form", clear_on_submit=False):
         run_button = st.form_submit_button("Run selected processors", type="primary")
         if run_button:
@@ -296,7 +292,7 @@ with right_col:
                         cleanup_temp_dir(tmp_folder)
 
 # -----------------------------------------------------------------------------
-# Manual processor choice — use responsive column layout too
+# Manual processor choice
 ratios_tab = choose_cols_ratio(client_width, purpose="tab")
 with st.expander("Manual processor choice"):
     tab1, tab2, tab3 = st.tabs(["Merge GeoJSON", "CSV → GeoJSON", "Extract Embedded"])
@@ -369,11 +365,11 @@ with tab2:
                     m1, m2 = st.columns(2)
                     m1.metric("Inputs", summary["inputs"]); m2.metric("Outputs", summary["outputs"])
                     st.write(f"ProducerCountry: `{summary['country']}`")
-                    if summary["written"]:
+                    if summary.get("written"):
                         with st.expander("Written files"):
                             for src, dst, n in summary["written"]:
                                 st.write(f"- {src} → {dst} ({n} features)")
-                    if summary["errors"]:
+                    if summary.get("errors"):
                         with st.expander("Errors"):
                             for name, msg in summary["errors"]:
                                 st.write(f"- {name}: {msg}")
