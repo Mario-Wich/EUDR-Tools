@@ -2,7 +2,7 @@
 defaults:
   input_folder: "C:/Projects/EUDR/Input"
   output_folder: "C:/Projects/EUDR/Output"
-  default_country: "Unknown"
+  default_country: "NZ"
 
 merge_geojson:
   input_folder: ""
