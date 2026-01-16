@@ -14,6 +14,7 @@ call "%VENV%\Scripts\activate"
 pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 
+start "" http://localhost:8501/
 streamlit run app.py
 
 ENDLOCAL

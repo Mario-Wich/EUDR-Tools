@@ -1,1 +1,4 @@
 *.geojson
+*.xlsx
+*.bak
+config.yaml
