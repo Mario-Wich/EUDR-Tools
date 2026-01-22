@@ -265,7 +265,6 @@ with right_col:
                                     output_file=str(out_file),
                                     producer_country=producer_country_geo
                                     or cfg_get("defaults", "default_country", "NZ"),
-                                    add_bbox=False,
                                 )
                                 st.success(f"merge_geojson → {final_path}")
                                 c1, c2 = st.columns(2)
