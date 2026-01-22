@@ -11,6 +11,7 @@ if not exist "%VENV%" (
 )
 call "%VENV%\Scripts\activate"
 
+python.exe -m pip install --upgrade pip --quiet
 pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 
